@@ -13,120 +13,102 @@ title:
 
 Use `react-dnd` to realize the drag and drop of tabs.
 
-```tsx
-import React, { useRef, useState } from 'react';
+```js
+import { Component, useState, useRef } from 'react';
 import { Tabs } from '@arco-design/web-react';
-import { TabPaneProps } from '@arco-design/web-react/es/Tabs';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { DndProvider, DragSource, DropTarget, createDndContext } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import type { Identifier, XYCoord } from 'dnd-core';
-
 const { TabPane } = Tabs;
 
-interface DragItem {
-    index: number;
+class TabNode extends Component {
+  render() {
+    const { connectDragSource, connectDropTarget, children } = this.props;
+    return connectDragSource(connectDropTarget(children));
+  }
 }
 
-interface WrapTabNodeProps {
-    index: number;
-    moveTabNode: (dragIndex: number, hoverIndex: number) => void;
-    children: React.ReactNode;
-}
+const cardTarget = {
+  drop(props, monitor) {
+    const dragKey = monitor.getItem().index;
+    const hoverKey = props.index;
 
-const initTabs: (TabPaneProps & { key: React.Key })[] = [
-    { key: 'tab 1', title: 'tab 1', children: 'Content of Tab Pane 1' },
-    { key: 'tab 2', title: 'tab 2', children: 'Content of Tab Pane 2' },
-    { key: 'tab 3', title: 'tab 3', children: 'Content of Tab Pane 3' }
-];
+    if (dragKey === hoverKey) {
+      return;
+    }
 
-const WrapTabNode = (props: WrapTabNodeProps) => {
-    const { index, moveTabNode, children, ...elseProps } = props;
-
-    const ref = useRef<HTMLDivElement>(null);
-
-    const [{ handlerId }, drop] = useDrop<DragItem, void, { handlerId: Identifier | null }>({
-        accept: 'DND_NODE',
-        collect(monitor) {
-            return {
-                handlerId: monitor.getHandlerId()
-            };
-        },
-        hover(item, monitor) {
-            if (!ref.current) {
-                return;
-            }
-            const dragIndex = item.index;
-            const hoverIndex = index;
-
-            if (dragIndex === hoverIndex) {
-                return;
-            }
-
-            const hoverBoundingRect = ref.current?.getBoundingClientRect();
-            const hoverMiddleX = (hoverBoundingRect.right - hoverBoundingRect.left) / 2;
-
-            const clientOffset = monitor.getClientOffset();
-            const hoverClientX = (clientOffset as XYCoord).x - hoverBoundingRect.left;
-
-            if (dragIndex < hoverIndex && hoverClientX < hoverMiddleX) {
-                return;
-            }
-
-            if (dragIndex > hoverIndex && hoverClientX > hoverMiddleX) {
-                return;
-            }
-
-            moveTabNode(dragIndex, hoverIndex);
-
-            item.index = hoverIndex;
-        }
-    });
-
-    const [, drag] = useDrag({
-        type: 'DND_NODE',
-        item: () => {
-            return { index };
-        }
-    });
-
-    drag(drop(ref));
-
-    return (
-        <div ref={ref} data-handler-id={handlerId} {...elseProps}>
-            {children}
-        </div>
-    );
+    props.moveTabNode(dragKey, hoverKey);
+    monitor.getItem().index = hoverKey;
+  },
 };
+const WrapTabNode = DropTarget('DND_NODE', cardTarget, (connect) => ({
+  connectDropTarget: connect.dropTarget(),
+}))(
+  DragSource(
+    'DND_NODE',
+    {
+      beginDrag(props) {
+        return {
+          id: props.id,
+          index: props.index,
+        };
+      },
+    },
+    (connect, monitor) => ({
+      connectDragSource: connect.dragSource(),
+      isDragging: monitor.isDragging(),
+    })
+  )(TabNode)
+);
+
+function DraggableTabs(props) {
+  const [tabs, setTabs] = useState(props.children || []);
+  const manager = useRef(createDndContext(HTML5Backend));
+
+  const moveTabNode = (dragKey, hoverKey) => {
+    const newTabs = [...tabs];
+    let dragTab = null;
+    const dragIndex = newTabs.findIndex((item) => item.key === dragKey);
+    const hoverIndex = newTabs.findIndex((item) => item.key === hoverKey);
+    newTabs.splice(dragIndex, 1);
+    newTabs.splice(hoverIndex, 0, tabs[dragIndex]);
+    setTabs(newTabs);
+  };
+
+  const renderTabHeader = (props, DefaultTabBar) => {
+    return (
+      <DefaultTabBar {...props}>
+        {(node) => {
+          return (
+            <WrapTabNode key={node.key} index={node.key} moveTabNode={moveTabNode}>
+              {node}
+            </WrapTabNode>
+          );
+        }}
+      </DefaultTabBar>
+    );
+  };
+
+  return (
+    <DndProvider manager={manager.current.dragDropManager}>
+      <Tabs renderTabHeader={renderTabHeader}>{tabs}</Tabs>
+    </DndProvider>
+  );
+}
 
 const App = () => {
-    const [tabs, setTabs] = useState(initTabs);
-
-    const moveTabNode = (dragIndex: number, hoverIndex: number) =>
-        setTabs(prevTabs => {
-            const newCards = [...prevTabs];
-            newCards.splice(hoverIndex, 0, ...newCards.splice(dragIndex, 1));
-
-            return newCards;
-        });
-
-    return (
-        <DndProvider backend={HTML5Backend}>
-            <Tabs>
-                {tabs.map((tabPane, index) => (
-                    <TabPane
-                        key={tabPane.key}
-                        title={
-                            <WrapTabNode key={index} index={index} moveTabNode={moveTabNode}>
-                                {tabPane.title}
-                            </WrapTabNode>
-                        }
-                    >
-                        {tabPane.children}
-                    </TabPane>
-                ))}
-            </Tabs>
-        </DndProvider>
-    );
+  return (
+    <DraggableTabs>
+      <TabPane title="tab 1" key="1">
+        Content of Tab Pane 1
+      </TabPane>
+      <TabPane title="tab 2" key="2">
+        Content of Tab Pane 2
+      </TabPane>
+      <TabPane title="tab 3" key="3">
+        Content of Tab Pane 3
+      </TabPane>
+    </DraggableTabs>
+  );
 };
 
 export default App;
